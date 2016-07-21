@@ -79,7 +79,7 @@ void die(std::string msg, sycl::exception & e)
     exit(1);
 }
 
-template<typename FloatingType, typename CopyName, typename Triad_Name>
+template<typename FloatingType, typename CopyName, typename MulName, typename AddName, typename Triad_Name>
 void perform_computations(sycl::queue & queue_, std::string & status, std::size_t array_size, std::size_t ntimes, std::vector<std::vector<double>> & timings)
 {
     // Create host vectors
@@ -104,9 +104,6 @@ void perform_computations(sycl::queue & queue_, std::string & status, std::size_
         sycl::buffer<FloatingType, 1> d_b(h_b, sycl::range<1>(ARRAY_SIZE));
         sycl::buffer<FloatingType, 1> d_c(h_c, sycl::range<1>(ARRAY_SIZE));
 
-        // List of times
-        std::vector< std::vector<double> > timings;
-
         // Declare timers
         std::chrono::high_resolution_clock::time_point t1, t2;
 
@@ -130,14 +127,14 @@ void perform_computations(sycl::queue & queue_, std::string & status, std::size_
 
             status = "Executing mul";
             t1 = std::chrono::high_resolution_clock::now();   
-//            queue_.submit([&](sycl::handler& cgh) {
-//                auto d_b_acc = d_b.template get_access<write>(cgh);
-//                auto d_c_acc = d_c.template get_access<read>(cgh);
-//
-//                cgh.parallel_for<class Mul>(range<2>(ARRAY_SIZE), [=](id<1> idx) {
-//                    d_b_acc[idx[0]] = d_c_acc[idx[0]] * scalar;
-//                });
-//            });
+            queue_.submit([&](sycl::handler& cgh) {
+                auto d_b_acc = d_b.template get_access<mode::write>(cgh);
+                auto d_c_acc = d_c.template get_access<mode::read>(cgh);
+
+                cgh.parallel_for<MulName>(range<1>(ARRAY_SIZE), [=](id<1> idx) {
+                    d_b_acc[idx[0]] = d_c_acc[idx[0]] * scalar;
+                });
+            });
             queue_.wait();
             t2 = std::chrono::high_resolution_clock::now();
             times.push_back(std::chrono::duration_cast<std::chrono::duration<double> >(t2 - t1).count());
@@ -145,15 +142,15 @@ void perform_computations(sycl::queue & queue_, std::string & status, std::size_
 
             status = "Executing add";
             t1 = std::chrono::high_resolution_clock::now();
-//            queue_.submit([&](sycl::handler& cgh) {
-//                auto d_a_acc = d_a.template get_access<read>(cgh);
-//                auto d_b_acc = d_b.template get_access<read>(cgh);
-//                auto d_c_acc = d_c.template get_access<write>(cgh);
-//
-//                cgh.parallel_for<class Add>(range<1>(ARRAY_SIZE), [=](id<1> idx) {
-//                    d_c_acc[idx[0]] = d_b_acc[idx[0]] + d_a_acc[idx[0]];
-//                });
-//            });
+            queue_.submit([&](sycl::handler& cgh) {
+                auto d_a_acc = d_a.template get_access<mode::read>(cgh);
+                auto d_b_acc = d_b.template get_access<mode::read>(cgh);
+                auto d_c_acc = d_c.template get_access<mode::write>(cgh);
+
+                cgh.parallel_for<AddName>(range<1>(ARRAY_SIZE), [=](id<1> idx) {
+                    d_c_acc[idx[0]] = d_b_acc[idx[0]] + d_a_acc[idx[0]];
+                });
+            });
             queue_.wait();
             t2 = std::chrono::high_resolution_clock::now();
             times.push_back(std::chrono::duration_cast<std::chrono::duration<double> >(t2 - t1).count());
@@ -286,11 +283,19 @@ int main(int argc, char *argv[])
 
         if (useFloat)
         {
-            perform_computations<float, class float_copy, class float_triad>(queue, status, ARRAY_SIZE, NTIMES, timings);
+            perform_computations<float,
+		    class float_copy,
+		    class float_mul,
+		    class float_add,
+		    class float_triad>(queue, status, ARRAY_SIZE, NTIMES, timings);
         }
         else
         {
-            perform_computations<double, class double_copy, class double_triad>(queue, status, ARRAY_SIZE, NTIMES, timings);
+            perform_computations<double,
+		    class double_copy,
+		    class double_mul,
+		    class double_add,
+		    class double_triad>(queue, status, ARRAY_SIZE, NTIMES, timings);
         }
 
         // Crunch results

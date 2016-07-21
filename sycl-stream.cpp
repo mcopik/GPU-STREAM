@@ -100,7 +100,11 @@ void perform_computations(sycl::queue & queue_, std::string & status, std::size_
     //using buffer_type = sycl::buffer<FloatingType, 1>;
     
     {
-        sycl::buffer<FloatingType, 1> d_a(h_a, sycl::range<1>(ARRAY_SIZE));
+	sycl::context context = queue_.get_context();
+	cl_context opencl_context = context.get();
+	cl_mem buffer_a = clCreateBuffer(opencl_context, CL_MEM_READ_WRITE, 
+		ARRAY_SIZE * sizeof(FloatingType), nullptr, nullptr);
+        sycl::buffer<FloatingType, 1> d_a(buffer_a, context);
         sycl::buffer<FloatingType, 1> d_b(h_b, sycl::range<1>(ARRAY_SIZE));
         sycl::buffer<FloatingType, 1> d_c(h_c, sycl::range<1>(ARRAY_SIZE));
 

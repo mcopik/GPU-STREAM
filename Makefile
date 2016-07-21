@@ -6,7 +6,7 @@ ifeq ($(PLATFORM), Darwin)
 	LDLIBS = -framework OpenCL
 endif
 
-all: gpu-stream-ocl gpu-stream-cuda gpu-stream-hip
+all: gpu-stream-ocl gpu-stream-cuda gpu-stream-hip gpu-stream-sycl
 
 
 gpu-stream-ocl: ocl-stream.cpp common.o Makefile
@@ -33,6 +33,10 @@ else
 	$(error "Cannot find $(HIPCC), please install HIP toolkit")
 endif
 
+COMPUTECPP_PATH=/opt/ComputeCpp-16.03-Linux
+COMPUTECPP=$(COMPUTECPP_PATH)/tools/driver_script/computecpp
+gpu-stream-sycl: sycl-stream.cpp common.o Makefile
+	COMPUTECPP=$(COMPUTECPP_PATH) CXX=$(CXX) $(COMPUTECPP) $(CXXFLAGS) common.o $< -o $@
 
 .PHONY: clean
 

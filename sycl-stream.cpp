@@ -48,11 +48,24 @@
 //#include "CL/cl2.hpp"
 #include "common.h"
 
-using namespace cl::sycl;
+#include <SYCL/sycl.hpp>
+
+using namespace cl;
+using sycl::range;
+using sycl::id;
+using sycl::access::mode;
+
+#ifdef FLOAT
+	#define DATATYPE float
+	const DATATYPE scalar = 3.0f;
+#else
+	#define DATATYPE double
+	const DATATYPE scalar = 3.0;
+#endif
 
 std::string getDeviceName(const sycl::device & device);
 std::string getDeviceDriver(const sycl::device& device);
-std::vector<sycl::device> getDeviceList(;
+std::vector<sycl::device> getDeviceList();
 
 
 // Print error and exit
@@ -63,9 +76,114 @@ void die(std::string msg, sycl::exception & e)
             << msg
             << ": " << e.what()
             << std::endl;
-    exit();
+    exit(1);
 }
 
+template<typename FloatingType, typename CopyName, typename Triad_Name>
+void perform_computations(sycl::queue & queue_, std::string & status, std::size_t array_size, std::size_t ntimes, std::vector<std::vector<double>> & timings)
+{
+    // Create host vectors
+    FloatingType *h_a = new FloatingType[ARRAY_SIZE];
+    FloatingType *h_b = new FloatingType[ARRAY_SIZE];
+    FloatingType *h_c = new FloatingType[ARRAY_SIZE];
+
+    // Initilise arrays
+    for (unsigned int i = 0; i < ARRAY_SIZE; i++)
+    {
+        h_a[i] = 1.0f;
+        h_b[i] = 2.0f;
+        h_c[i] = 0.0f;
+    }
+
+    // Create device buffers
+    status = "Creating buffers";
+    //using buffer_type = sycl::buffer<FloatingType, 1>;
+    
+    {
+        sycl::buffer<FloatingType, 1> d_a(h_a, sycl::range<1>(ARRAY_SIZE));
+        sycl::buffer<FloatingType, 1> d_b(h_b, sycl::range<1>(ARRAY_SIZE));
+        sycl::buffer<FloatingType, 1> d_c(h_c, sycl::range<1>(ARRAY_SIZE));
+
+        // List of times
+        std::vector< std::vector<double> > timings;
+
+        // Declare timers
+        std::chrono::high_resolution_clock::time_point t1, t2;
+
+        // Main loop
+        for (unsigned int k = 0; k < NTIMES; k++)
+        {
+            status = "Executing copy";
+            std::vector<double> times;
+            t1 = std::chrono::high_resolution_clock::now();
+            queue_.submit([&](sycl::handler& cgh) {
+                auto d_a_acc = d_a.template get_access<mode::read>(cgh);
+                auto d_c_acc = d_c.template get_access<mode::write>(cgh);
+
+                cgh.parallel_for<CopyName>(range<1>(ARRAY_SIZE), [=](id<1> idx) {
+                    d_c_acc[idx[0]] = d_a_acc[idx[0]];
+                });
+            });
+            queue_.wait();
+            t2 = std::chrono::high_resolution_clock::now();
+            times.push_back(std::chrono::duration_cast<std::chrono::duration<double> >(t2 - t1).count());
+
+            status = "Executing mul";
+            t1 = std::chrono::high_resolution_clock::now();   
+//            queue_.submit([&](sycl::handler& cgh) {
+//                auto d_b_acc = d_b.template get_access<write>(cgh);
+//                auto d_c_acc = d_c.template get_access<read>(cgh);
+//
+//                cgh.parallel_for<class Mul>(range<2>(ARRAY_SIZE), [=](id<1> idx) {
+//                    d_b_acc[idx[0]] = d_c_acc[idx[0]] * scalar;
+//                });
+//            });
+            queue_.wait();
+            t2 = std::chrono::high_resolution_clock::now();
+            times.push_back(std::chrono::duration_cast<std::chrono::duration<double> >(t2 - t1).count());
+
+
+            status = "Executing add";
+            t1 = std::chrono::high_resolution_clock::now();
+//            queue_.submit([&](sycl::handler& cgh) {
+//                auto d_a_acc = d_a.template get_access<read>(cgh);
+//                auto d_b_acc = d_b.template get_access<read>(cgh);
+//                auto d_c_acc = d_c.template get_access<write>(cgh);
+//
+//                cgh.parallel_for<class Add>(range<1>(ARRAY_SIZE), [=](id<1> idx) {
+//                    d_c_acc[idx[0]] = d_b_acc[idx[0]] + d_a_acc[idx[0]];
+//                });
+//            });
+            queue_.wait();
+            t2 = std::chrono::high_resolution_clock::now();
+            times.push_back(std::chrono::duration_cast<std::chrono::duration<double> >(t2 - t1).count());
+
+
+            status = "Executing triad";
+            t1 = std::chrono::high_resolution_clock::now();
+            queue_.submit([&](sycl::handler& cgh) {
+                auto d_a_acc = d_a.template get_access<mode::write>(cgh);
+                auto d_b_acc = d_b.template get_access<mode::read>(cgh);
+                auto d_c_acc = d_c.template get_access<mode::read>(cgh);
+
+                cgh.parallel_for<Triad_Name>(range<1>(ARRAY_SIZE), [=](id<1> idx) {
+                    d_a_acc[idx[0]] = d_b_acc[idx[0]] + scalar * d_c_acc[idx[0]];
+                });
+            });
+            queue_.wait();
+            t2 = std::chrono::high_resolution_clock::now();
+            times.push_back(std::chrono::duration_cast<std::chrono::duration<double> >(t2 - t1).count());
+
+            timings.push_back(times);
+
+        }
+    } // Enforces buffer destruction and data copy back
+
+    check_solution<FloatingType>(h_a, h_b, h_c);
+    delete[] h_a;
+    delete[] h_b;
+    delete[] h_c;
+}
 
 int main(int argc, char *argv[])
 {
@@ -130,9 +248,6 @@ int main(int argc, char *argv[])
         // Reset precision
         std::cout.precision(ss);
 
-
-        // Setup OpenCL
-
         // Get list of devices
         std::vector<cl::sycl::device> devices = getDeviceList();
 
@@ -142,172 +257,40 @@ int main(int argc, char *argv[])
 
         cl::sycl::device device = devices[deviceIndex];
 
-        status = "Creating queue";
-        cl::sycl::queue queue(device);
-
         // Print out device name
         std::string name = getDeviceName(device);
-        std::cout << "Using OpenCL device " << device.get_info( << std::endl;
+        std::cout << "Using OpenCL device " << name << std::endl;
 
         // Print out OpenCL driver version for this device
         std::string driver = getDeviceDriver(device);
         std::cout << "Driver: " << driver << std::endl;
 
+        status = "Creating queue";
+        sycl::queue queue(device);
+
         // Check device can do double precision if requested
-        if (!useFloat && !device.getInfo<CL_DEVICE_DOUBLE_FP_CONFIG>())
+        if (!useFloat /*&& !device.get_info<sycl::info::device::double_fp_config>()*/)
             throw std::runtime_error("Device does not support double precision, please use --float");
 
         // Check buffers fit on the device
         status = "Getting device memory sizes";
-        cl_ulong totalmem = device.getInfo<CL_DEVICE_GLOBAL_MEM_SIZE>();
-        cl_ulong maxbuffer = device.getInfo<CL_DEVICE_MAX_MEM_ALLOC_SIZE>();
+        cl_ulong totalmem = device.get_info<sycl::info::device::global_mem_size>();
+        cl_ulong maxbuffer = device.get_info<sycl::info::device::max_mem_alloc_size>();
         if (maxbuffer < DATATYPE_SIZE*ARRAY_SIZE)
             throw std::runtime_error("Device cannot allocate a buffer big enough");
         if (totalmem < 3*DATATYPE_SIZE*ARRAY_SIZE)
             throw std::runtime_error("Device does not have enough memory for all 3 buffers");
 
-        try
-        {
-            std::string options = "";
-            if (useFloat)
-                options = "-DFLOAT";
-            program.build(options.c_str());
-        }
-        catch (cl::Error& e)
-        {
-            std::vector<cl::Device> devices = context.getInfo<CL_CONTEXT_DEVICES>();
-            std::string buildlog = program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices[0]);
-            std::cerr
-                << "Build error:"
-                << buildlog
-                << std::endl;
-            throw e;
-        }
 
-        status = "Making kernel copy";
-        auto copy = cl::KernelFunctor<cl::Buffer&, cl::Buffer&>(program, "copy");
-        status = "Making kernel mul";
-        auto mul = cl::KernelFunctor<cl::Buffer&, cl::Buffer&>(program, "mul");
-        status = "Making kernel add";
-        auto add = cl::KernelFunctor<cl::Buffer&, cl::Buffer&, cl::Buffer&>(program, "add");
-        status = "Making kernel triad";
-        auto triad = cl::KernelFunctor<cl::Buffer&, cl::Buffer&, cl::Buffer&>(program, "triad");
-
-        // Create host vectors
-        void *h_a = malloc(ARRAY_SIZE * DATATYPE_SIZE);
-        void *h_b = malloc(ARRAY_SIZE * DATATYPE_SIZE);
-        void *h_c = malloc(ARRAY_SIZE * DATATYPE_SIZE);
-
-        // Initilise arrays
-        for (unsigned int i = 0; i < ARRAY_SIZE; i++)
-        {
-            if (useFloat)
-            {
-                ((float*)h_a)[i] = 1.0f;
-                ((float*)h_b)[i] = 2.0f;
-                ((float*)h_c)[i] = 0.0f;
-            }
-            else
-            {
-                ((double*)h_a)[i] = 1.0;
-                ((double*)h_b)[i] = 2.0;
-                ((double*)h_c)[i] = 0.0;
-            }
-        }
-
-        // Create device buffers
-        status = "Creating buffers";
-        cl::Buffer d_a(context, CL_MEM_READ_WRITE, DATATYPE_SIZE * ARRAY_SIZE);
-        cl::Buffer d_b(context, CL_MEM_READ_WRITE, DATATYPE_SIZE * ARRAY_SIZE);
-        cl::Buffer d_c(context, CL_MEM_READ_WRITE, DATATYPE_SIZE * ARRAY_SIZE);
-
-
-        // Copy host memory to device
-        status = "Copying buffers";
-        queue.enqueueWriteBuffer(d_a, CL_FALSE, 0, ARRAY_SIZE*DATATYPE_SIZE, h_a);
-        queue.enqueueWriteBuffer(d_b, CL_FALSE, 0, ARRAY_SIZE*DATATYPE_SIZE, h_b);
-        queue.enqueueWriteBuffer(d_c, CL_FALSE, 0, ARRAY_SIZE*DATATYPE_SIZE, h_c);
-
-        // Make sure the copies are finished
-        queue.finish();
-
-
-        // List of times
-        std::vector< std::vector<double> > timings;
-
-        // Declare timers
-        std::chrono::high_resolution_clock::time_point t1, t2;
-
-        // Main loop
-        for (unsigned int k = 0; k < NTIMES; k++)
-        {
-            status = "Executing copy";
-            std::vector<double> times;
-            t1 = std::chrono::high_resolution_clock::now();
-            copy(
-                cl::EnqueueArgs(
-                queue,
-                cl::NDRange(ARRAY_SIZE)),
-                d_a, d_c);
-            queue.finish();
-            t2 = std::chrono::high_resolution_clock::now();
-            times.push_back(std::chrono::duration_cast<std::chrono::duration<double> >(t2 - t1).count());
-
-
-            status = "Executing mul";
-            t1 = std::chrono::high_resolution_clock::now();
-            mul(
-                cl::EnqueueArgs(
-                queue,
-                cl::NDRange(ARRAY_SIZE)),
-                d_b, d_c);
-            queue.finish();
-            t2 = std::chrono::high_resolution_clock::now();
-            times.push_back(std::chrono::duration_cast<std::chrono::duration<double> >(t2 - t1).count());
-
-
-            status = "Executing add";
-            t1 = std::chrono::high_resolution_clock::now();
-            add(
-                cl::EnqueueArgs(
-                queue,
-                cl::NDRange(ARRAY_SIZE)),
-                d_a, d_b, d_c);
-            queue.finish();
-            t2 = std::chrono::high_resolution_clock::now();
-            times.push_back(std::chrono::duration_cast<std::chrono::duration<double> >(t2 - t1).count());
-
-
-            status = "Executing triad";
-            t1 = std::chrono::high_resolution_clock::now();
-            triad(
-                cl::EnqueueArgs(
-                queue,
-                cl::NDRange(ARRAY_SIZE)),
-                d_a, d_b, d_c);
-            queue.finish();
-            t2 = std::chrono::high_resolution_clock::now();
-            times.push_back(std::chrono::duration_cast<std::chrono::duration<double> >(t2 - t1).count());
-
-            timings.push_back(times);
-
-        }
-
-        // Check solutions
-        status = "Copying back buffers";
-        queue.enqueueReadBuffer(d_a, CL_FALSE, 0, ARRAY_SIZE*DATATYPE_SIZE, h_a);
-        queue.enqueueReadBuffer(d_b, CL_FALSE, 0, ARRAY_SIZE*DATATYPE_SIZE, h_b);
-        queue.enqueueReadBuffer(d_c, CL_FALSE, 0, ARRAY_SIZE*DATATYPE_SIZE, h_c);
-        queue.finish();
-
+        std::vector< std::vector<double> > timings;   
 
         if (useFloat)
         {
-            check_solution<float>(h_a, h_b, h_c);
+            perform_computations<float, class float_copy, class float_triad>(queue, status, ARRAY_SIZE, NTIMES, timings);
         }
         else
         {
-            check_solution<double>(h_a, h_b, h_c);
+            perform_computations<double, class double_copy, class double_triad>(queue, status, ARRAY_SIZE, NTIMES, timings);
         }
 
         // Crunch results
@@ -353,13 +336,8 @@ int main(int argc, char *argv[])
                 << std::endl;
         }
 
-        // Free host vectors
-        free(h_a);
-        free(h_b);
-        free(h_c);
-
     }
-    catch (cl::Error &e)
+    catch (sycl::exception &e)
     {
         die(status, e);
     }
@@ -380,7 +358,7 @@ std::vector<sycl::device> getDeviceList()
     // Get list of platforms
     try
     {
-        return sycl::device::get_devices(sycl::info::device_type::all);
+        return sycl::device::get_devices( CL_DEVICE_TYPE_ALL /* sycl::info::device_type::all*/);
     }
     catch (sycl::exception &e)
     {
@@ -389,11 +367,11 @@ std::vector<sycl::device> getDeviceList()
 }
 
 
-std::string getDeviceName(const cl::Device& device)
+std::string getDeviceName(const sycl::device& device)
 {
     try
     {
-        return device.get_info(sycl::info::device::name);
+        return device.get_info<sycl::info::device::name>();
     }
     catch (sycl::exception &e)
     {
@@ -405,7 +383,7 @@ std::string getDeviceDriver(const sycl::device& device)
 {
     try
     {
-        return device.get_info(sycl::info::device::version);
+        return device.get_info<sycl::info::device::driver_version>();
     }
     catch (sycl::exception &e)
     {

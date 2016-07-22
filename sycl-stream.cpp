@@ -104,7 +104,9 @@ void perform_computations(sycl::queue & queue_, std::string & status, std::size_
 	cl_context opencl_context = context.get();
 	cl_mem buffer_a = clCreateBuffer(opencl_context, CL_MEM_READ_WRITE, 
 		ARRAY_SIZE * sizeof(FloatingType), nullptr, nullptr);
-        sycl::buffer<FloatingType, 1> d_a(buffer_a, context);
+       	clEnqueueWriteBuffer(queue_.get(), buffer_a, true, 0, sizeof(h_a)*ARRAY_SIZE,
+		h_a, 0, nullptr, nullptr);		
+	sycl::buffer<FloatingType, 1> d_a(buffer_a, queue_);
         sycl::buffer<FloatingType, 1> d_b(h_b, sycl::range<1>(ARRAY_SIZE));
         sycl::buffer<FloatingType, 1> d_c(h_c, sycl::range<1>(ARRAY_SIZE));
 
@@ -178,6 +180,8 @@ void perform_computations(sycl::queue & queue_, std::string & status, std::size_
             timings.push_back(times);
 
         }
+	clEnqueueReadBuffer(queue_.get(), buffer_a, true, 0, sizeof(h_a)*ARRAY_SIZE,
+		h_a, 0, nullptr, nullptr);
     } // Enforces buffer destruction and data copy back
 
     check_solution<FloatingType>(h_a, h_b, h_c);
@@ -270,7 +274,7 @@ int main(int argc, char *argv[])
         sycl::queue queue(device);
 
         // Check device can do double precision if requested
-        if (!useFloat /*&& !device.get_info<sycl::info::device::double_fp_config>()*/)
+        if (!useFloat && device.get_info<sycl::info::device::double_fp_config>().empty())
             throw std::runtime_error("Device does not support double precision, please use --float");
 
         // Check buffers fit on the device

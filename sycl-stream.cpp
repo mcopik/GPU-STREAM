@@ -79,6 +79,23 @@ void die(std::string msg, sycl::exception & e)
     exit(1);
 }
 
+template<typename FloatingType>
+cl_mem to_device(FloatingType * data, sycl::queue & queue_, cl_context & context)
+{
+    cl_mem cl_buffer = clCreateBuffer(context, CL_MEM_READ_WRITE, 
+	ARRAY_SIZE * sizeof(FloatingType), nullptr, nullptr);
+    clEnqueueWriteBuffer(queue_.get(), cl_buffer, true, 0, sizeof(FloatingType)*ARRAY_SIZE,
+	data, 0, nullptr, nullptr);
+    return cl_buffer;
+}
+
+template<typename FloatingType>
+void to_host(sycl::queue & queue_, cl_mem & buffer, FloatingType * host_data)
+{
+    clEnqueueReadBuffer(queue_.get(), buffer, true, 0, sizeof(host_data)*ARRAY_SIZE,
+	host_data, 0, nullptr, nullptr);
+}
+
 template<typename FloatingType, typename CopyName, typename MulName, typename AddName, typename Triad_Name>
 void perform_computations(sycl::queue & queue_, std::string & status, std::size_t array_size, std::size_t ntimes, std::vector<std::vector<double>> & timings)
 {
@@ -102,13 +119,12 @@ void perform_computations(sycl::queue & queue_, std::string & status, std::size_
     {
 	sycl::context context = queue_.get_context();
 	cl_context opencl_context = context.get();
-	cl_mem buffer_a = clCreateBuffer(opencl_context, CL_MEM_READ_WRITE, 
-		ARRAY_SIZE * sizeof(FloatingType), nullptr, nullptr);
-       	clEnqueueWriteBuffer(queue_.get(), buffer_a, true, 0, sizeof(h_a)*ARRAY_SIZE,
-		h_a, 0, nullptr, nullptr);		
+	cl_mem buffer_a = to_device(h_a, queue_, opencl_context);
+	cl_mem buffer_b = to_device(h_b, queue_, opencl_context);	
+	cl_mem buffer_c = to_device(h_c, queue_, opencl_context);	
 	sycl::buffer<FloatingType, 1> d_a(buffer_a, queue_);
-        sycl::buffer<FloatingType, 1> d_b(h_b, sycl::range<1>(ARRAY_SIZE));
-        sycl::buffer<FloatingType, 1> d_c(h_c, sycl::range<1>(ARRAY_SIZE));
+        sycl::buffer<FloatingType, 1> d_b(buffer_b, queue_);
+        sycl::buffer<FloatingType, 1> d_c(buffer_c, queue_);
 
         // Declare timers
         std::chrono::high_resolution_clock::time_point t1, t2;
@@ -180,8 +196,9 @@ void perform_computations(sycl::queue & queue_, std::string & status, std::size_
             timings.push_back(times);
 
         }
-	clEnqueueReadBuffer(queue_.get(), buffer_a, true, 0, sizeof(h_a)*ARRAY_SIZE,
-		h_a, 0, nullptr, nullptr);
+   	to_host(queue_, buffer_a, h_a);
+	to_host(queue_, buffer_b, h_b);
+	to_host(queue_, buffer_c, h_c); 
     } // Enforces buffer destruction and data copy back
 
     check_solution<FloatingType>(h_a, h_b, h_c);

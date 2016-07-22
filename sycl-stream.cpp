@@ -265,8 +265,8 @@ int main(int argc, char *argv[])
         status = "Creating queue";
         sycl::queue queue(device);
 
-        // Check device can do double precision if requested
-        if (!useFloat /*&& !device.get_info<sycl::info::device::double_fp_config>()*/)
+	// Check device can do double precision if requested
+        if (!useFloat && device.get_info<sycl::info::device::double_fp_config>().empty())
             throw std::runtime_error("Device does not support double precision, please use --float");
 
         // Check buffers fit on the device

@@ -54,6 +54,8 @@ using namespace cl;
 using sycl::range;
 using sycl::id;
 using sycl::access::mode;
+using sycl::nd_range;
+using sycl::nd_item;
 
 #ifdef FLOAT
 	#define DATATYPE float
@@ -67,6 +69,7 @@ std::string getDeviceName(const sycl::device & device);
 std::string getDeviceDriver(const sycl::device& device);
 std::vector<sycl::device> getDeviceList();
 
+static const size_t LOCAL_SIZE = 128;
 
 // Print error and exit
 void die(std::string msg, sycl::exception & e)
@@ -117,8 +120,8 @@ void perform_computations(sycl::queue & queue_, std::string & status, std::size_
                 auto d_a_acc = d_a.template get_access<mode::read>(cgh);
                 auto d_c_acc = d_c.template get_access<mode::write>(cgh);
 
-                cgh.parallel_for<CopyName>(range<1>(ARRAY_SIZE), [=](id<1> idx) {
-                    d_c_acc[idx[0]] = d_a_acc[idx[0]];
+                cgh.parallel_for<CopyName>(nd_range<1>(range<1>(ARRAY_SIZE), range<1>(LOCAL_SIZE)), [=](nd_item<1> it) {
+                    d_c_acc[it.get_global_linear_id()] = d_a_acc[it.get_global_linear_id()];
                 });
             });
             queue_.wait();
@@ -131,8 +134,8 @@ void perform_computations(sycl::queue & queue_, std::string & status, std::size_
                 auto d_b_acc = d_b.template get_access<mode::write>(cgh);
                 auto d_c_acc = d_c.template get_access<mode::read>(cgh);
 
-                cgh.parallel_for<MulName>(range<1>(ARRAY_SIZE), [=](id<1> idx) {
-                    d_b_acc[idx[0]] = d_c_acc[idx[0]] * scalar;
+                cgh.parallel_for<MulName>(nd_range<1>(range<1>(ARRAY_SIZE), range<1>(LOCAL_SIZE)), [=](nd_item<1> it) {
+                    d_b_acc[it.get_global_linear_id()] = d_c_acc[it.get_global_linear_id()] * scalar;
                 });
             });
             queue_.wait();
@@ -147,8 +150,8 @@ void perform_computations(sycl::queue & queue_, std::string & status, std::size_
                 auto d_b_acc = d_b.template get_access<mode::read>(cgh);
                 auto d_c_acc = d_c.template get_access<mode::write>(cgh);
 
-                cgh.parallel_for<AddName>(range<1>(ARRAY_SIZE), [=](id<1> idx) {
-                    d_c_acc[idx[0]] = d_b_acc[idx[0]] + d_a_acc[idx[0]];
+                cgh.parallel_for<AddName>(nd_range<1>(range<1>(ARRAY_SIZE), range<1>(LOCAL_SIZE)), [=](nd_item<1> it) {
+                    d_c_acc[it.get_global_linear_id()] = d_b_acc[it.get_global_linear_id()] + d_a_acc[it.get_global_linear_id()];
                 });
             });
             queue_.wait();
@@ -163,8 +166,8 @@ void perform_computations(sycl::queue & queue_, std::string & status, std::size_
                 auto d_b_acc = d_b.template get_access<mode::read>(cgh);
                 auto d_c_acc = d_c.template get_access<mode::read>(cgh);
 
-                cgh.parallel_for<Triad_Name>(range<1>(ARRAY_SIZE), [=](id<1> idx) {
-                    d_a_acc[idx[0]] = d_b_acc[idx[0]] + scalar * d_c_acc[idx[0]];
+                cgh.parallel_for<Triad_Name>(nd_range<1>(range<1>(ARRAY_SIZE), range<1>(LOCAL_SIZE)), [=](nd_item<1> it) {
+                  d_a_acc[it.get_global_linear_id()] = d_b_acc[it.get_global_linear_id()] + scalar * d_c_acc[it.get_global_linear_id()];
                 });
             });
             queue_.wait();
